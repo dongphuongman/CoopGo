@@ -1,7 +1,7 @@
 """
 Models cho phương tiện và lái xe — cấu trúc theo file thực tế Trường Phát
 """
-from sqlalchemy import Column, String, DateTime, Text, Integer, Float, Boolean, Index, UniqueConstraint, Enum
+from sqlalchemy import Column, String, DateTime, Date, Text, Integer, Float, Boolean, Index, UniqueConstraint, Enum
 from sqlalchemy.sql import func
 import uuid, enum
 from app.core.database import Base
@@ -32,9 +32,19 @@ class PhuongTien(Base):
     tuyen_khai_thac      = Column(String(200), nullable=True)                # Tuyến khai thác
 
     # ── Giấy tờ / Pháp lý ────────────────────────────────────────
-    han_dang_kiem        = Column(String(20),  nullable=True,  index=True)   # Ngày hết hạn Đăng kiểm
+    han_dang_kiem        = Column(String(20),  nullable=True,  index=True)   # Ngày hết hạn Đăng kiểm (giữ tương thích Excel cũ)
     han_phu_hieu         = Column(String(20),  nullable=True,  index=True)   # Ngày hết hạn Phù hiệu
     han_bao_hiem         = Column(String(20),  nullable=True,  index=True)   # Ngày hết hạn Bảo hiểm TNDS
+    # Cột Date chuẩn để cảnh báo hết hạn (tự sync từ String khi import/save)
+    han_dang_kiem_date   = Column(Date,        nullable=True,  index=True)
+    han_phu_hieu_date    = Column(Date,        nullable=True,  index=True)
+    han_bao_hiem_date    = Column(Date,        nullable=True,  index=True)
+
+    # ── Thông số bổ sung ───────────────────────────────────────────
+    so_khung             = Column(String(100), nullable=True)
+    so_may               = Column(String(100), nullable=True)
+    trong_tai_kg         = Column(Integer,     nullable=True)
+    so_ghe               = Column(Integer,     nullable=True)
 
     # ── Thiết bị GSHT ─────────────────────────────────────────────
     gsht_ten             = Column(String(100), nullable=True)   # Tên thiết bị
@@ -70,6 +80,12 @@ class LaiXe(Base):
 
     # ── Thông tin cá nhân ────────────────────────────────────────
     ho_ten               = Column(String(200), nullable=False, index=True)
+    sdt                  = Column(String(20),  nullable=True,  index=True)
+    cccd                 = Column(String(20),  nullable=True,  index=True)
+    dia_chi              = Column(String(300), nullable=True)
+    ngay_sinh            = Column(Date,        nullable=True)
+    anh_dai_dien         = Column(String(500), nullable=True)  # path/URL ảnh
+    anh_gplx             = Column(String(500), nullable=True)  # path/URL scan GPLX
 
     # ── Nhiệm vụ ─────────────────────────────────────────────────
     nhiem_vu_lai_xe      = Column(String(10),  nullable=True)   # X nếu là lái xe
@@ -77,10 +93,13 @@ class LaiXe(Base):
 
     # ── GPLX ─────────────────────────────────────────────────────
     hang_gplx            = Column(String(10),  nullable=True,  index=True)   # Hạng: B2, C, D, E
-    han_gplx             = Column(String(20),  nullable=True,  index=True)   # Ngày hết hạn GPLX
+    han_gplx             = Column(String(20),  nullable=True,  index=True)   # Ngày hết hạn GPLX (tương thích cũ)
+    han_gplx_date        = Column(Date,        nullable=True,  index=True)
+    so_gplx              = Column(String(50),  nullable=True,  index=True)
 
     # ── Hợp đồng lao động ────────────────────────────────────────
     hop_dong_ngay_ky     = Column(String(20),  nullable=True)
+    hop_dong_ngay_ky_date = Column(Date,      nullable=True)
     hop_dong_loai        = Column(String(100), nullable=True)   # xác định thời hạn / 1 năm...
 
     # ── Bảo hiểm ─────────────────────────────────────────────────
@@ -88,10 +107,12 @@ class LaiXe(Base):
 
     # ── Khám sức khỏe định kỳ ────────────────────────────────────
     ksk_ngay_kham        = Column(String(20),  nullable=True)
+    ksk_ngay_kham_date   = Column(Date,        nullable=True)
     ksk_ket_qua          = Column(String(100), nullable=True)   # Đủ sức khỏe / Không đủ
 
     # ── Tập huấn nghiệp vụ ───────────────────────────────────────
     tap_huan_ngay        = Column(String(20),  nullable=True)
+    tap_huan_ngay_date   = Column(Date,        nullable=True)
     tap_huan_don_vi      = Column(String(100), nullable=True)   # Sở GTVT / Công ty...
     tap_huan_so_gcn      = Column(String(50),  nullable=True)   # Số GCN tập huấn
 
@@ -126,5 +147,8 @@ class ImportJob(Base):
     error_details   = Column(Text,        nullable=True)   # JSON array
     header_row      = Column(Integer,     default=4)
     data_start_row  = Column(Integer,     default=6)
+    # Nâng cao import: chế độ upsert + mapping cột do user gửi
+    upsert_mode     = Column(String(20),  default="upsert")
+    column_mapping  = Column(Text,        nullable=True)  # JSON {excel_col: db_field}
     created_at      = Column(DateTime(timezone=True), server_default=func.now())
     completed_at    = Column(DateTime(timezone=True), nullable=True)

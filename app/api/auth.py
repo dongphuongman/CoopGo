@@ -78,6 +78,7 @@ class UserResponse(BaseModel):
     full_name: Optional[str]
     is_active: bool
     is_admin: bool
+    role: Optional[str] = "van_phong"
     created_at: Optional[datetime]
 
 
@@ -104,6 +105,23 @@ async def get_current_user(
     if not user or not user.is_active:
         raise credentials_exc
     return user
+
+
+def _role_of(user: User) -> str:
+    return getattr(user, "role", None) or ("admin" if user.is_admin else "van_phong")
+
+
+def require_roles(*allowed: str):
+    """Dependency factory: chỉ role trong danh sách (admin luôn được qua)."""
+    async def _check(current: User = Depends(get_current_user)) -> User:
+        role = _role_of(current)
+        if role != "admin" and role not in allowed:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Role '{role}' không có quyền. Cần: {', '.join(allowed)}",
+            )
+        return current
+    return _check
 
 
 # ─── Endpoints ───────────────────────────────────────────────────────────────
@@ -174,5 +192,6 @@ def _to_response(u: User) -> UserResponse:
         full_name=u.full_name,
         is_active=u.is_active,
         is_admin=u.is_admin,
+        role=getattr(u, "role", None) or ("admin" if u.is_admin else "van_phong"),
         created_at=u.created_at,
     )

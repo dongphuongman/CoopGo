@@ -13,6 +13,7 @@ import {
   AlertCircle,
   Pencil,
   Save,
+  Sparkles,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -33,7 +34,7 @@ import {
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
-import { getTemplates, uploadTemplate, deleteTemplate, updateLabels, Template } from "@/lib/api";
+import { getTemplates, uploadTemplate, deleteTemplate, updateLabels, relabelTemplate, Template } from "@/lib/api";
 
 const Templates = () => {
   const queryClient = useQueryClient();
@@ -84,6 +85,16 @@ const Templates = () => {
       queryClient.invalidateQueries({ queryKey: ["templates"] });
       toast.success("Đã cập nhật labels");
       setEditLabelsTemplate(null);
+    },
+    onError: (err: Error) => toast.error(err.message),
+  });
+
+  const relabelMutation = useMutation({
+    mutationFn: (id: string) => relabelTemplate(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["templates"] });
+      queryClient.invalidateQueries({ queryKey: ["template"] });
+      toast.success("Đã chuẩn hóa nhãn tiếng Việt (giữ nguyên nhãn bạn đã sửa tay)");
     },
     onError: (err: Error) => toast.error(err.message),
   });
@@ -259,6 +270,14 @@ const Templates = () => {
                 <DropdownMenuContent align="end">
                   <DropdownMenuItem onClick={(e) => openLabelEditor(template, e)}>
                     <Pencil className="w-3.5 h-3.5 mr-2" /> Chỉnh sửa Labels
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      relabelMutation.mutate(template.id);
+                    }}
+                  >
+                    <Sparkles className="w-3.5 h-3.5 mr-2" /> Chuẩn hóa nhãn TV
                   </DropdownMenuItem>
                   <DropdownMenuItem
                     className="text-destructive focus:text-destructive"

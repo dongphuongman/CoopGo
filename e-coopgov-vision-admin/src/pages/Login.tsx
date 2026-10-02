@@ -42,8 +42,8 @@ export default function Login() {
             <FileCode2 className="w-6 h-6 text-primary-foreground" />
           </div>
           <div className="text-center">
-            <h1 className="font-display text-2xl font-bold">eCoopGov</h1>
-            <p className="text-sm text-muted-foreground mt-0.5">DocGen Admin Panel</p>
+            <h1 className="font-display text-2xl font-bold">CoopGo</h1>
+            <p className="text-sm text-muted-foreground mt-0.5">Quản trị HTX vận tải</p>
           </div>
         </div>
 

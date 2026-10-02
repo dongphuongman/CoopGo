@@ -14,7 +14,6 @@ Query (filter linh hoạt):
   GET  /fleet/lai-xe/{id}          - Chi tiết lái xe
   GET  /fleet/stats                - Thống kê tổng hợp
 """
-import shutil
 import uuid
 import json
 import io
@@ -31,62 +30,78 @@ from app.core.config import get_settings
 from app.core.database import get_db
 from app.models.fleet_models import PhuongTien, LaiXe, ImportJob, ImportStatus
 from app.services.excel_import_service import import_excel
+from app.api.auth import require_roles
+from app.utils.date_parse import parse_vn_date
+from app.utils.uploads import save_upload_limited
 
 router = APIRouter(prefix="/fleet", tags=["Fleet - Phương tiện & Lái xe"])
 settings = get_settings()
+
+FLEET_IMPORT = require_roles("admin", "dieu_hanh")
+FLEET_WRITE = require_roles("admin", "dieu_hanh")
 
 
 # ════════════════════════════════════════════════════════════════════════════
 # IMPORT ENDPOINTS
 # ════════════════════════════════════════════════════════════════════════════
 
-@router.post("/phuong-tien/import", summary="Import Excel danh sách phương tiện")
+@router.post("/phuong-tien/import", summary="Import Excel danh sách phương tiện",
+             dependencies=[Depends(FLEET_IMPORT)])
 async def import_phuong_tien(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     header_row:    int  = Form(default=4, description="Dòng bắt đầu header (file Trường Phát = 4)"),
     data_start_row: int = Form(default=6, description="Dòng bắt đầu data (file Trường Phát = 6)"),
     preview: bool = Form(default=False, description="Preview: parse nhưng không lưu"),
+    upsert_mode: str = Form(default="upsert", description="upsert|insert (insert=bỏ qua trùng)"),
+    column_mapping: str = Form(default="", description="JSON {col_index: db_field} để override mapping"),
     db: AsyncSession = Depends(get_db),
 ):
-    return await _handle_import(file, "phuong_tien", header_row, data_start_row, preview, background_tasks, db)
+    return await _handle_import(file, "phuong_tien", header_row, data_start_row, preview, background_tasks, db,
+                                upsert_mode, column_mapping)
 
 
-@router.post("/lai-xe/import", summary="Import Excel danh sách lái xe")
+@router.post("/lai-xe/import", summary="Import Excel danh sách lái xe",
+             dependencies=[Depends(FLEET_IMPORT)])
 async def import_lai_xe(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     header_row:    int  = Form(default=4),
     data_start_row: int = Form(default=6),
-    preview: bool = Form(default=False),
+    preview: bool = Form(default=False, description="Preview: parse nhưng không lưu"),
+    upsert_mode: str = Form(default="upsert"),
+    column_mapping: str = Form(default="", description="JSON {col_index: db_field}"),
     db: AsyncSession = Depends(get_db),
 ):
-    return await _handle_import(file, "lai_xe", header_row, data_start_row, preview, background_tasks, db)
+    return await _handle_import(file, "lai_xe", header_row, data_start_row, preview, background_tasks, db,
+                                upsert_mode, column_mapping)
 
 
-async def _handle_import(file, table, header_row, data_start_row, preview, background_tasks, db):
-    if not file.filename.endswith((".xlsx", ".xls")):
-        raise HTTPException(400, "Chỉ chấp nhận file .xlsx hoặc .xls")
-
+async def _handle_import(file, table, header_row, data_start_row, preview, background_tasks, db,
+                         upsert_mode: str = "upsert", column_mapping: str = ""):
     job_id = str(uuid.uuid4())
     filepath = settings.UPLOAD_DIR / f"{job_id}_{file.filename}"
-    with open(filepath, "wb") as f:
-        shutil.copyfileobj(file.file, f)
+    await save_upload_limited(file, filepath,
+                              allowed_exts=(".xlsx", ".xls"),
+                              max_mb=settings.MAX_UPLOAD_MB)
 
-    job = ImportJob(
-        id=job_id,
-        target_table=table,
-        filename=file.filename,
-        status=ImportStatus.PENDING,
-        preview_mode=preview,
-        header_row=header_row,
-        data_start_row=data_start_row,
-    )
-    db.add(job)
-    await db.flush()
+    mapping = {}
+    if column_mapping:
+        try:
+            mapping = json.loads(column_mapping)
+        except Exception:
+            mapping = {}
 
     if preview:
-        result = await _run_import(job_id, str(filepath), table, header_row, data_start_row, preview=True)
+        # Preview: parse trực tiếp, KHÔNG tạo ImportJob trong DB
+        # (job tạo ở session này chưa commit nên session khác không thấy -> failed oan)
+        result = await import_excel(db, str(filepath), table, f"preview-{job_id}",
+                                    header_row, data_start_row, True,
+                                    column_mapping=mapping, upsert_mode=upsert_mode)
+        try:
+            Path(filepath).unlink(missing_ok=True)
+        except Exception:
+            pass
         return {
             "mode": "preview",
             "total_rows":  result["total"],
@@ -95,13 +110,28 @@ async def _handle_import(file, table, header_row, data_start_row, preview, backg
             "sample_errors": result["error_details"][:10],
             "message": "Preview xong. Gọi lại với preview=false để import thật."
         }
-    else:
-        background_tasks.add_task(_run_import, job_id, str(filepath), table, header_row, data_start_row, False)
-        return {
-            "job_id": job_id,
-            "status": "pending",
-            "message": f"Import đang chạy background. Poll GET /fleet/import-jobs/{job_id}",
-        }
+
+    job = ImportJob(
+        id=job_id,
+        target_table=table,
+        filename=file.filename,
+        status=ImportStatus.PENDING,
+        preview_mode=False,
+        header_row=header_row,
+        data_start_row=data_start_row,
+        upsert_mode=upsert_mode if upsert_mode in ("upsert", "insert") else "upsert",
+        column_mapping=column_mapping or None,
+    )
+    db.add(job)
+    await db.flush()
+
+    background_tasks.add_task(_run_import, job_id, str(filepath), table, header_row, data_start_row, False,
+                              mapping, upsert_mode)
+    return {
+        "job_id": job_id,
+        "status": "pending",
+        "message": f"Import đang chạy background. Poll GET /fleet/import-jobs/{job_id}",
+    }
 
 
 @router.get("/import-jobs/{job_id}", summary="Xem tiến trình import")
@@ -141,6 +171,183 @@ async def get_import_errors(job_id: str, db: AsyncSession = Depends(get_db)):
     return {"job_id": job_id, "total_errors": len(errors), "errors": errors}
 
 
+@router.get("/import-jobs/{job_id}/errors-xlsx", summary="Tải file Excel các dòng lỗi (highlight)")
+async def get_import_errors_xlsx(job_id: str, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(ImportJob).where(ImportJob.id == job_id))
+    job = result.scalar_one_or_none()
+    if not job:
+        raise HTTPException(404, "Import job không tồn tại")
+    errors = json.loads(job.error_details) if job.error_details else []
+    import openpyxl
+    from openpyxl.styles import Font, PatternFill
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Loi import"
+    ws.append(["Dòng Excel", "Trường", "Lỗi"])
+    for c in ws[1]:
+        c.font = Font(bold=True, color="FFFFFF")
+        c.fill = PatternFill("solid", fgColor="C0392B")
+    for e in errors:
+        ws.append([e.get("row"), e.get("field"), e.get("error")])
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    return StreamingResponse(buf,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="loi_import_{job_id[:8]}.xlsx"'})
+
+
+@router.post("/import/preview-headers", summary="Đọc header Excel để UI mapping cột",
+             dependencies=[Depends(FLEET_IMPORT)])
+async def preview_headers(
+    file: UploadFile = File(...),
+    header_row: int = Form(default=4),
+    data_start_row: int = Form(default=6),
+):
+    import openpyxl
+    from pathlib import Path as _Path
+    import uuid as _uuid
+    tmp_path = settings.TEMP_DIR / f"preview_{_uuid.uuid4().hex}.xlsx"
+    await save_upload_limited(file, _Path(tmp_path),
+                              allowed_exts=(".xlsx", ".xls"),
+                              max_mb=settings.MAX_UPLOAD_MB)
+    try:
+        wb = openpyxl.load_workbook(tmp_path, read_only=True, data_only=True)
+        ws = wb.active
+        headers: list[str] = []
+        for row_idx, row in enumerate(ws.iter_rows(values_only=True), start=1):
+            if header_row <= row_idx < data_start_row:
+                for v in row:
+                    if v is not None and str(v).strip():
+                        headers.append(str(v).strip())
+        wb.close()
+        # gợi ý field DB
+        from app.services.excel_import_service import PHUONG_TIEN_MAP, LAI_XE_MAP
+        suggest = {}
+        for h in headers:
+            k = h.lower().strip()
+            if k in PHUONG_TIEN_MAP and PHUONG_TIEN_MAP[k]:
+                suggest[h] = PHUONG_TIEN_MAP[k]
+            elif k in LAI_XE_MAP and LAI_XE_MAP[k]:
+                suggest[h] = LAI_XE_MAP[k]
+        return {"headers": headers, "goi_y_mapping": suggest}
+    finally:
+        _Path(tmp_path).unlink(missing_ok=True)
+
+
+# ─── Validate PATCH (chặn dữ liệu rác trước khi lưu) ──────────────────────
+_PT_DATES = {"han_dang_kiem", "han_phu_hieu", "han_bao_hiem"}
+_LX_DATES = {"han_gplx", "hop_dong_ngay_ky", "ksk_ngay_kham", "tap_huan_ngay"}
+
+_PT_INTS = {"nam_san_xuat": (1900, 2100), "so_cho": (1, 100),
+            "trong_tai_kg": (0, 100000), "so_ghe": (1, 100)}
+
+
+def _validate_patch(payload: dict, *, date_fields: set, int_fields: dict,
+                    hang_field: str | None = None) -> dict:
+    """Trả về payload đã chuẩn hóa; raise 422 nếu sai định dạng."""
+    from app.services.gplx_service import normalize_hang
+    clean: dict = {}
+    for k, v in payload.items():
+        if v is None or (isinstance(v, str) and not v.strip()):
+            clean[k] = None
+            continue
+        if k in date_fields:
+            d = parse_vn_date(v)
+            if d is None:
+                raise HTTPException(
+                    422, f"Ngày không hợp lệ: '{k}' = '{v}' (dùng YYYY-MM-DD hoặc DD/MM/YYYY)")
+            clean[k] = v
+        elif k in int_fields:
+            lo, hi = int_fields[k]
+            try:
+                iv = int(float(v))
+            except (TypeError, ValueError):
+                raise HTTPException(422, f"'{k}' phải là số, nhận được '{v}'")
+            if not (lo <= iv <= hi):
+                raise HTTPException(422, f"'{k}' phải trong khoảng {lo}..{hi}")
+            clean[k] = iv
+        elif hang_field and k == hang_field:
+            h = normalize_hang(v)
+            if not h:
+                raise HTTPException(422, f"Hạng GPLX không hợp lệ: '{v}' (vd B2, C, D, E)")
+            clean[k] = h
+        else:
+            clean[k] = v
+    return clean
+
+
+@router.patch("/phuong-tien/{pt_id}", summary="Cập nhật phương tiện (validate + tự sync Date)",
+              dependencies=[Depends(FLEET_WRITE)])
+async def update_phuong_tien(pt_id: str, payload: dict, db: AsyncSession = Depends(get_db)):
+    from app.services.audit_service import log_audit as _log
+    row = (await db.execute(select(PhuongTien).where(PhuongTien.id == pt_id))).scalar_one_or_none()
+    if not row:
+        raise HTTPException(404, "Phương tiện không tồn tại")
+    payload = _validate_patch(payload, date_fields=_PT_DATES, int_fields=_PT_INTS)
+    allowed = {"hang_xe", "nam_san_xuat", "so_cho", "mau_xe", "loai_hinh_hoat_dong",
+               "tuyen_khai_thac", "han_dang_kiem", "han_phu_hieu", "han_bao_hiem",
+               "gsht_ten", "gsht_don_vi", "gsht_dia_chi", "gsht_mat_khau",
+               "so_khung", "so_may", "trong_tai_kg", "so_ghe",
+               "loai_so_huu", "loai_di_thue", "trang_thai", "ghi_chu"}
+    for k, v in payload.items():
+        if k in allowed and hasattr(row, k):
+            setattr(row, k, v)
+    # sync Date
+    for s_key, d_key in [("han_dang_kiem", "han_dang_kiem_date"),
+                         ("han_phu_hieu", "han_phu_hieu_date"),
+                         ("han_bao_hiem", "han_bao_hiem_date")]:
+        if s_key in payload and hasattr(row, d_key):
+            d = parse_vn_date(payload[s_key])
+            setattr(row, d_key, d)
+    await _log(db, action="update", entity="phuong_tien", entity_id=pt_id, detail=row.bien_so)
+    return _pt_to_dict(row)
+
+
+@router.patch("/lai-xe/{lx_id}", summary="Cập nhật lái xe (validate + tự sync Date + check GPLX)",
+              dependencies=[Depends(FLEET_WRITE)])
+async def update_lai_xe(lx_id: str, payload: dict, db: AsyncSession = Depends(get_db)):
+    from app.services.audit_service import log_audit as _log
+    row = (await db.execute(select(LaiXe).where(LaiXe.id == lx_id))).scalar_one_or_none()
+    if not row:
+        raise HTTPException(404, "Lái xe không tồn tại")
+    payload = _validate_patch(payload, date_fields=_LX_DATES | {"ngay_sinh"},
+                              int_fields={}, hang_field="hang_gplx")
+    if payload.get("sdt") and len(str(payload["sdt"])) > 20:
+        raise HTTPException(422, "SĐT quá dài")
+    if payload.get("cccd") and not str(payload["cccd"]).replace(" ", "").isdigit():
+        raise HTTPException(422, "CCCD phải là số")
+    allowed = {"ho_ten", "sdt", "cccd", "dia_chi", "nhiem_vu_lai_xe", "nhiem_vu_nv_phuc_vu",
+               "hang_gplx", "han_gplx", "so_gplx", "hop_dong_ngay_ky", "hop_dong_loai",
+               "dong_bhxh_bhyt", "ksk_ngay_kham", "ksk_ket_qua", "tap_huan_ngay",
+               "tap_huan_don_vi", "tap_huan_so_gcn", "trang_thai", "ghi_chu"}
+    for k, v in payload.items():
+        if k in allowed and hasattr(row, k):
+            setattr(row, k, v)
+    if "ngay_sinh" in payload and hasattr(row, "ngay_sinh"):
+        row.ngay_sinh = parse_vn_date(payload["ngay_sinh"])
+    for s_key, d_key in [("han_gplx", "han_gplx_date"),
+                         ("hop_dong_ngay_ky", "hop_dong_ngay_ky_date"),
+                         ("ksk_ngay_kham", "ksk_ngay_kham_date"),
+                         ("tap_huan_ngay", "tap_huan_ngay_date")]:
+        if s_key in payload and hasattr(row, d_key):
+            setattr(row, d_key, parse_vn_date(payload[s_key]))
+    await _log(db, action="update", entity="lai_xe", entity_id=lx_id, detail=row.ho_ten)
+    return _lx_to_dict(row)
+
+
+@router.get("/lai-xe/{lx_id}/gplx-check", summary="Kiểm tra GPLX có đủ lái xe bao nhiêu chỗ")
+async def gplx_check(lx_id: str, so_cho: int = Query(..., ge=1, le=100),
+                     db: AsyncSession = Depends(get_db)):
+    from app.services.gplx_service import validate_gplx_for_so_cho
+    row = (await db.execute(select(LaiXe).where(LaiXe.id == lx_id))).scalar_one_or_none()
+    if not row:
+        raise HTTPException(404, "Lái xe không tồn tại")
+    ok, msg = validate_gplx_for_so_cho(row.hang_gplx, so_cho)
+    return {"ho_ten": row.ho_ten, "hang_gplx": row.hang_gplx, "so_cho": so_cho,
+            "dat": ok, "chi_tiet": msg}
+
+
 # ════════════════════════════════════════════════════════════════════════════
 # QUERY PHƯƠNG TIỆN — Filter linh hoạt
 # ════════════════════════════════════════════════════════════════════════════
@@ -148,6 +355,7 @@ async def get_import_errors(job_id: str, db: AsyncSession = Depends(get_db)):
 def _build_pt_query(q, bien_so, hang_xe, loai_hinh, trang_thai, so_cho, so_cho_min, so_cho_max,
                     loai_so_huu=None, loai_di_thue=None,
                     han_dang_kiem_truoc=None, han_bao_hiem_truoc=None):
+    from app.utils.date_parse import parse_vn_date as _pd
     stmt = select(PhuongTien)
     if q:
         q_like = f"%{q}%"
@@ -168,8 +376,20 @@ def _build_pt_query(q, bien_so, hang_xe, loai_hinh, trang_thai, so_cho, so_cho_m
     if loai_so_huu == "khong":  stmt = stmt.where(PhuongTien.loai_so_huu == None)
     if loai_di_thue == "X":  stmt = stmt.where(PhuongTien.loai_di_thue != None)
     if loai_di_thue == "khong":  stmt = stmt.where(PhuongTien.loai_di_thue == None)
-    if han_dang_kiem_truoc:  stmt = stmt.where(PhuongTien.han_dang_kiem <= han_dang_kiem_truoc)
-    if han_bao_hiem_truoc:   stmt = stmt.where(PhuongTien.han_bao_hiem <= han_bao_hiem_truoc)
+    if han_dang_kiem_truoc:
+        _d = _pd(han_dang_kiem_truoc)
+        if _d and hasattr(PhuongTien, "han_dang_kiem_date"):
+            stmt = stmt.where(or_(PhuongTien.han_dang_kiem_date <= _d,
+                                  PhuongTien.han_dang_kiem <= han_dang_kiem_truoc))
+        else:
+            stmt = stmt.where(PhuongTien.han_dang_kiem <= han_dang_kiem_truoc)
+    if han_bao_hiem_truoc:
+        _d2 = _pd(han_bao_hiem_truoc)
+        if _d2 and hasattr(PhuongTien, "han_bao_hiem_date"):
+            stmt = stmt.where(or_(PhuongTien.han_bao_hiem_date <= _d2,
+                                  PhuongTien.han_bao_hiem <= han_bao_hiem_truoc))
+        else:
+            stmt = stmt.where(PhuongTien.han_bao_hiem <= han_bao_hiem_truoc)
     return stmt
 
 
@@ -498,7 +718,8 @@ async def get_fleet_stats(db: AsyncSession = Depends(get_db)):
 # BACKGROUND IMPORT TASK
 # ════════════════════════════════════════════════════════════════════════════
 
-async def _run_import(job_id: str, filepath: str, table: str, header_row: int, data_start_row: int, preview: bool = False):
+async def _run_import(job_id: str, filepath: str, table: str, header_row: int, data_start_row: int, preview: bool = False,
+                  column_mapping: dict | None = None, upsert_mode: str = "upsert"):
     from app.core.database import AsyncSessionLocal
 
     stats = {"total": 0, "success": 0, "errors": 0, "error_details": []}
@@ -511,7 +732,8 @@ async def _run_import(job_id: str, filepath: str, table: str, header_row: int, d
             await db.commit()
 
             # Run import
-            stats = await import_excel(db, filepath, table, job_id, header_row, data_start_row, preview)
+            stats = await import_excel(db, filepath, table, job_id, header_row, data_start_row, preview,
+                                       column_mapping=column_mapping, upsert_mode=upsert_mode)
             await db.commit()  # commit data import vào DB
 
             # Update job kết quả
@@ -541,6 +763,12 @@ async def _run_import(job_id: str, filepath: str, table: str, header_row: int, d
 
 # ─── Helpers ────────────────────────────────────────────────────────────────
 def _pt_to_dict(r: PhuongTien) -> dict:
+    from app.utils.date_parse import parse_vn_date as _p
+    def _iso(d, s):
+        if d:
+            return str(d)
+        dd = _p(s) if s else None
+        return dd.isoformat() if dd else s
     return {
         "id": r.id,
         "bien_so": r.bien_so,
@@ -553,8 +781,14 @@ def _pt_to_dict(r: PhuongTien) -> dict:
         "han_dang_kiem": r.han_dang_kiem,
         "han_phu_hieu": r.han_phu_hieu,
         "han_bao_hiem": r.han_bao_hiem,
+        "han_dang_kiem_date": _iso(getattr(r, "han_dang_kiem_date", None), r.han_dang_kiem),
+        "han_phu_hieu_date": _iso(getattr(r, "han_phu_hieu_date", None), r.han_phu_hieu),
+        "han_bao_hiem_date": _iso(getattr(r, "han_bao_hiem_date", None), r.han_bao_hiem),
         "gsht_ten": r.gsht_ten,
         "gsht_don_vi": r.gsht_don_vi,
+        "so_khung": getattr(r, "so_khung", None),
+        "so_may": getattr(r, "so_may", None),
+        "trong_tai_kg": getattr(r, "trong_tai_kg", None),
         "loai_so_huu": r.loai_so_huu,
         "loai_di_thue": r.loai_di_thue,
         "trang_thai": r.trang_thai,
@@ -563,13 +797,25 @@ def _pt_to_dict(r: PhuongTien) -> dict:
     }
 
 def _lx_to_dict(r: LaiXe) -> dict:
+    from app.utils.date_parse import parse_vn_date as _p
+    def _iso(d, s):
+        if d:
+            return str(d)
+        dd = _p(s) if s else None
+        return dd.isoformat() if dd else s
     return {
         "id": r.id,
         "ho_ten": r.ho_ten,
+        "sdt": getattr(r, "sdt", None),
+        "cccd": getattr(r, "cccd", None),
+        "dia_chi": getattr(r, "dia_chi", None),
+        "ngay_sinh": str(getattr(r, "ngay_sinh", None)) if getattr(r, "ngay_sinh", None) else None,
+        "so_gplx": getattr(r, "so_gplx", None),
         "nhiem_vu_lai_xe": r.nhiem_vu_lai_xe,
         "nhiem_vu_nv_phuc_vu": r.nhiem_vu_nv_phuc_vu,
         "hang_gplx": r.hang_gplx,
         "han_gplx": r.han_gplx,
+        "han_gplx_date": _iso(getattr(r, "han_gplx_date", None), r.han_gplx),
         "hop_dong_ngay_ky": r.hop_dong_ngay_ky,
         "hop_dong_loai": r.hop_dong_loai,
         "dong_bhxh_bhyt": r.dong_bhxh_bhyt,

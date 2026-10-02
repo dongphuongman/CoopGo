@@ -2,7 +2,6 @@ import { NavLink, useLocation, useNavigate } from "react-router-dom";
 import {
   LayoutDashboard,
   FileText,
-  Printer,
   ListChecks,
   Settings,
   ChevronLeft,
@@ -11,18 +10,30 @@ import {
   User,
   Truck,
   Users,
+  BellRing,
+  CalendarClock,
+  Wrench,
+  QrCode,
+  FileSignature,
 } from "lucide-react";
 import { useState } from "react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/contexts/AuthContext";
+import { canAccess, normalizeRole, roleLabel } from "@/lib/permissions";
 
 const navItems = [
   { to: "/", icon: LayoutDashboard, label: "Dashboard" },
+  { to: "/canh-bao", icon: BellRing, label: "Cảnh báo" },
   { to: "/templates", icon: FileText, label: "Templates" },
-  { to: "/render", icon: Printer, label: "Render" },
+  { to: "/render", icon: FileSignature, label: "Tạo hợp đồng" },
+  { to: "/bulk", icon: QrCode, label: "Bulk + Verify" },
   { to: "/jobs", icon: ListChecks, label: "Jobs" },
   { to: "/phuong-tien", icon: Truck, label: "Phương tiện" },
   { to: "/lai-xe", icon: Users, label: "Lái xe" },
+  { to: "/dieu-hanh", icon: CalendarClock, label: "Điều hành" },
+  { to: "/bao-tri", icon: Wrench, label: "Bảo trì" },
+  // Tạm ẩn: Xã viên (chức năng tài chính HTX chưa hoàn thiện, sẽ mở lại sau)
+  // { to: "/xa-vien", icon: HandCoins, label: "Xã viên" },
   { to: "/settings", icon: Settings, label: "Cấu hình" },
 ];
 
@@ -31,6 +42,8 @@ export function AppSidebar() {
   const location = useLocation();
   const navigate = useNavigate();
   const { user, logout } = useAuth();
+  const role = normalizeRole(user?.role, user?.is_admin);
+  const visibleItems = navItems.filter((item) => canAccess(role, item.to));
 
   function handleLogout() {
     logout();
@@ -52,16 +65,16 @@ export function AppSidebar() {
         {!collapsed && (
           <div className="animate-slide-in">
             <h1 className="font-display text-base font-bold text-sidebar-primary-foreground tracking-tight">
-              eCoopGov
+              CoopGo
             </h1>
-            <p className="text-[10px] text-sidebar-foreground/60 leading-none">DocGen System</p>
+            <p className="text-[10px] text-sidebar-foreground/60 leading-none">HTX Vận tải</p>
           </div>
         )}
       </div>
 
       {/* Nav */}
       <nav className="flex-1 py-4 px-2 space-y-1">
-        {navItems.map((item) => {
+        {visibleItems.map((item) => {
           const isActive = location.pathname === item.to;
           return (
             <NavLink
@@ -96,7 +109,9 @@ export function AppSidebar() {
             {!collapsed && (
               <div className="animate-slide-in min-w-0">
                 <p className="text-xs font-medium truncate">{user.full_name ?? user.username}</p>
-                <p className="text-[10px] text-sidebar-foreground/50 truncate">{user.email}</p>
+                <p className="text-[10px] text-sidebar-foreground/50 truncate">
+                  {roleLabel(user.role, user.is_admin)} • {user.email}
+                </p>
               </div>
             )}
           </div>

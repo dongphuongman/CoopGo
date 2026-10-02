@@ -7,7 +7,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 
     # App
-    APP_NAME: str = "DocGen API"
+    APP_NAME: str = "CoopGo API"
     APP_VERSION: str = "1.0.0"
     DEBUG: bool = False
 
@@ -31,8 +31,28 @@ class Settings(BaseSettings):
     MAX_CONCURRENT_RENDERS: int = 10
     RENDER_TIMEOUT_SECONDS: int = 60
 
+    # Upload
+    MAX_UPLOAD_MB: float = 20
+
+    # Thông báo hết hạn
+    SCHEDULER_ENABLED: bool = False  # bật job chạy đêm nhắc hết hạn
+    NOTIFY_WITHIN_DAYS: int = 30
+    # Email (SMTP) — để trống = không gửi mail
+    SMTP_HOST: str = ""
+    SMTP_PORT: int = 587
+    SMTP_USER: str = ""
+    SMTP_PASS: str = ""
+    SMTP_FROM: str = ""
+    NOTIFY_EMAILS: str = ""  # cách nhau dấu phẩy
+    # Zalo OA — để trống = không gửi Zalo
+    ZALO_OA_TOKEN: str = ""
+    ZALO_USER_IDS: str = ""  # cách nhau dấu phẩy
+
     # API Key (đơn giản, có thể nâng lên JWT sau)
     API_SECRET_KEY: str = "changeme-in-production"
+
+    # URL web công khai (để sinh QR trỏ tới trang /verify/:code)
+    PUBLIC_WEB_URL: str = "http://localhost:3000"
 
     def ensure_dirs(self):
         for d in [self.UPLOAD_DIR, self.OUTPUT_DIR, self.TEMP_DIR]:

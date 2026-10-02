@@ -1,14 +1,19 @@
 from contextlib import asynccontextmanager
-from fastapi import FastAPI
+from fastapi import FastAPI, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 
 from app.core.config import get_settings
 from app.core.database import init_db
 from app.core.logging import setup_logging, logger
-from app.api import template, render, config, fleet, auth
+from app.api import template, render, config, fleet, auth, alerts, ops, coop, ext, dashboard
+from app.api.auth import get_current_user
+from app.core.scheduler import start_scheduler, stop_scheduler
 
 settings = get_settings()
+
+# Mọi router nghiệp vụ đều yêu cầu đăng nhập (trừ auth, health, verify công khai)
+Authed = [Depends(get_current_user)]
 
 
 @asynccontextmanager
@@ -17,8 +22,10 @@ async def lifespan(app: FastAPI):
     setup_logging()
     settings.ensure_dirs()
     await init_db()
+    start_scheduler()  # job nhắc hết hạn 7h sáng (nếu SCHEDULER_ENABLED=true)
     logger.info("app_started", version=settings.APP_VERSION, debug=settings.DEBUG)
     yield
+    stop_scheduler()
     logger.info("app_stopped")
 
 
@@ -26,7 +33,7 @@ app = FastAPI(
     title=settings.APP_NAME,
     version=settings.APP_VERSION,
     description="""
-## 📄 DocGen API – Word Template → PDF
+## 📄 CoopGo API – Word Template → PDF
 
 ### Tính năng
 - **Upload template** `.docx` (Jinja2 syntax)
@@ -56,12 +63,18 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Routers
+# Routers (auth.router tự quản lý: login/register public, /me cần token)
 app.include_router(auth.router)
-app.include_router(template.router)
-app.include_router(render.router)
-app.include_router(config.router)
-app.include_router(fleet.router)
+app.include_router(template.router, dependencies=Authed)
+app.include_router(render.router, dependencies=Authed)
+app.include_router(config.router, dependencies=Authed)
+app.include_router(fleet.router, dependencies=Authed)
+app.include_router(alerts.router, dependencies=Authed)
+app.include_router(ops.router, dependencies=Authed)
+app.include_router(coop.router, dependencies=Authed)
+app.include_router(ext.router, dependencies=Authed)
+app.include_router(ext.public_router)  # /verify/{code} công khai cho CSGT quét QR
+app.include_router(dashboard.router, dependencies=Authed)
 
 @app.get("/", include_in_schema=False)
 async def root():

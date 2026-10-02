@@ -12,7 +12,7 @@ export default defineConfig(({ mode }) => ({
     },
     proxy: {
       "/api": {
-        target: "https://api.ecoopgov.devhub.ai.vn",
+        target: process.env.VITE_API_TARGET || "https://api.ecoopgov.devhub.ai.vn",
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/api/, ""),
       },

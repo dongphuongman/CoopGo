@@ -19,6 +19,7 @@ class TableMeta(BaseModel):
     loop_var: str = "item"
     columns: list[str] = []
     column_labels: dict[str, str] = {}
+    column_hints: dict[str, str] = {}  # giải thích viết tắt, vd {"cccd": "CCCD: Căn cước công dân"}
     access: str = "loop"  # "loop" = {% for %} | "index" = list[0].field
 
 

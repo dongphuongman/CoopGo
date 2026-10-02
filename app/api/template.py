@@ -6,7 +6,6 @@ Template API:
   PATCH /templates/{id}/labels - Override labels
   DELETE /templates/{id}    - Xóa template
 """
-import shutil
 import uuid
 import copy
 from pathlib import Path
@@ -18,17 +17,23 @@ from sqlalchemy.orm.attributes import flag_modified
 from app.core.config import get_settings
 from app.core.database import get_db, Template
 from app.core.template_parser import parse_template
-from app.services.ai_service import generate_labels_with_ai
+from app.services.ai_service import generate_labels_with_ai, rule_based_hints
+from app.api.auth import require_roles
+from app.utils.uploads import save_upload_limited
 from app.models.schema import (
     TemplateCreateResponse, TemplateDetailResponse,
     LabelConfigUpdate, TemplateMeta, FieldMeta, TableMeta
 )
 
+TPL_WRITE = require_roles("admin", "dieu_hanh", "van_phong")
+TPL_DELETE = require_roles("admin", "dieu_hanh")
+
 router = APIRouter(prefix="/templates", tags=["Templates"])
 settings = get_settings()
 
 
-@router.post("/", response_model=TemplateCreateResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/", response_model=TemplateCreateResponse, status_code=status.HTTP_201_CREATED,
+             dependencies=[Depends(TPL_WRITE)])
 async def upload_template(
     file: UploadFile = File(..., description="File .docx template (Jinja2 syntax)"),
     name: str = Form(..., description="Tên template"),
@@ -38,16 +43,13 @@ async def upload_template(
     """
     Upload template .docx → tự động parse placeholder + AI generate labels tiếng Việt.
     """
-    if not file.filename.endswith(".docx"):
-        raise HTTPException(status_code=400, detail="Chỉ chấp nhận file .docx")
-
-    # Lưu file
+    # Lưu file (giới hạn dung lượng + đúng .docx)
     template_id = str(uuid.uuid4())
     safe_filename = f"{template_id}_{file.filename}"
     filepath = settings.UPLOAD_DIR / safe_filename
-
-    with open(filepath, "wb") as buffer:
-        shutil.copyfileobj(file.file, buffer)
+    await save_upload_limited(file, filepath,
+                              allowed_exts=(".docx",),
+                              max_mb=settings.MAX_UPLOAD_MB)
 
     # Parse template
     try:
@@ -62,6 +64,7 @@ async def upload_template(
         all_keys.extend(table["columns"])
 
     ai_labels = await generate_labels_with_ai(all_keys) if all_keys else {}
+    hints = rule_based_hints(all_keys)
 
     # Build metadata với labels
     fields = [
@@ -69,6 +72,7 @@ async def upload_template(
             key=f["key"],
             label=ai_labels.get(f["key"], f["key"]),
             type=f["type"],
+            description=hints.get(f["key"]),
         )
         for f in parsed["fields"]
     ]
@@ -79,6 +83,7 @@ async def upload_template(
             loop_var=t["loop_var"],
             columns=t["columns"],
             column_labels={col: ai_labels.get(col, col) for col in t["columns"]},
+            column_hints={col: hints[col] for col in t["columns"] if col in hints},
             access=t.get("access", "loop"),
         )
         for t in parsed["tables"]
@@ -125,7 +130,8 @@ async def get_template(template_id: str, db: AsyncSession = Depends(get_db)):
     return _to_response(template)
 
 
-@router.patch("/{template_id}/labels", response_model=TemplateDetailResponse)
+@router.patch("/{template_id}/labels", response_model=TemplateDetailResponse,
+             dependencies=[Depends(TPL_WRITE)])
 async def update_labels(
     template_id: str,
     payload: LabelConfigUpdate,
@@ -161,7 +167,48 @@ async def update_labels(
     return _to_response(template)
 
 
-@router.delete("/{template_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.post("/{template_id}/relabel", response_model=TemplateDetailResponse,
+             summary="Chuẩn hóa lại nhãn tiếng Việt có dấu (giữ nhãn user đã sửa)",
+             dependencies=[Depends(TPL_WRITE)])
+async def relabel_template(template_id: str, db: AsyncSession = Depends(get_db)):
+    """
+    Sinh lại nhãn tiếng Việt có dấu + hint cho template đã upload trước đây.
+    Các nhãn user đã chỉnh tay (label_config) được giữ nguyên.
+    """
+    template = await _get_or_404(template_id, db)
+    meta = copy.deepcopy(template.field_metadata or {"fields": [], "tables": []})
+    manual = template.label_config or {}
+
+    keys = [f["key"] for f in meta.get("fields", [])]
+    for t in meta.get("tables", []):
+        keys.extend(t.get("columns", []))
+
+    fresh_labels = await generate_labels_with_ai(keys) if keys else {}
+    fresh_hints = rule_based_hints(keys)
+
+    for f in meta.get("fields", []):
+        k = f["key"]
+        if k not in manual:  # giữ nhãn user đã sửa
+            f["label"] = fresh_labels.get(k, f.get("label", k))
+        f["description"] = fresh_hints.get(k)
+    for t in meta.get("tables", []):
+        hints = {}
+        for col in t.get("columns", []):
+            col_key = f"{t['key']}.{col}"
+            if col not in manual and col_key not in manual:
+                t["column_labels"][col] = fresh_labels.get(col, t["column_labels"].get(col, col))
+            if col in fresh_hints:
+                hints[col] = fresh_hints[col]
+        t["column_hints"] = hints
+
+    template.field_metadata = meta
+    flag_modified(template, "field_metadata")
+    await db.flush()
+    return _to_response(template)
+
+
+@router.delete("/{template_id}", status_code=status.HTTP_204_NO_CONTENT,
+             dependencies=[Depends(TPL_DELETE)])
 async def delete_template(template_id: str, db: AsyncSession = Depends(get_db)):
     """Xóa template và file liên quan."""
     template = await _get_or_404(template_id, db)

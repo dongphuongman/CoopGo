@@ -39,6 +39,7 @@ class User(Base):
     full_name     = Column(String(255), nullable=True)
     is_active     = Column(Boolean, default=True, nullable=False)
     is_admin      = Column(Boolean, default=False, nullable=False)
+    role          = Column(String(50), default="van_phong", nullable=True, index=True)
     created_at    = Column(DateTime(timezone=True), server_default=func.now())
     updated_at    = Column(DateTime(timezone=True), onupdate=func.now())
 
@@ -85,6 +86,7 @@ async def get_db():
 async def init_db():
     # Import models để SQLAlchemy biết các bảng cần tạo
     from app.models import fleet_models  # noqa: F401
+    from app.models import coop_models  # noqa: F401 — tuyến/phân công/lệnh/bảo trì/xã viên/audit/verify
     import functools
     from sqlalchemy.exc import OperationalError
     from sqlalchemy import text
@@ -127,3 +129,44 @@ async def init_db():
             )
         except Exception:
             pass  # Index already exists
+
+        # ── Safe migrations cho cột mới (MySQL không có IF NOT EXISTS) ──
+        def _col_exists_sync(sync_conn, table: str, col: str) -> bool:
+            try:
+                rows = list(sync_conn.execute(
+                    text("SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS "
+                         "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = :t AND COLUMN_NAME = :c"),
+                    {"t": table, "c": col}))
+                return bool(rows and rows[0][0])
+            except Exception:
+                return True  # không check được (sqlite?) -> coi như đã có để bỏ qua
+
+        async def _ensure_column(table: str, col: str, ddl: str):
+            try:
+                exists = await conn.run_sync(_col_exists_sync, table, col)
+                if not exists:
+                    await conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {ddl}"))
+            except Exception:
+                pass
+
+        await _ensure_column("phuong_tien", "han_dang_kiem_date", "han_dang_kiem_date DATE NULL")
+        await _ensure_column("phuong_tien", "han_phu_hieu_date", "han_phu_hieu_date DATE NULL")
+        await _ensure_column("phuong_tien", "han_bao_hiem_date", "han_bao_hiem_date DATE NULL")
+        await _ensure_column("phuong_tien", "so_khung", "so_khung VARCHAR(100) NULL")
+        await _ensure_column("phuong_tien", "so_may", "so_may VARCHAR(100) NULL")
+        await _ensure_column("phuong_tien", "trong_tai_kg", "trong_tai_kg INT NULL")
+        await _ensure_column("phuong_tien", "so_ghe", "so_ghe INT NULL")
+        await _ensure_column("lai_xe", "sdt", "sdt VARCHAR(20) NULL")
+        await _ensure_column("lai_xe", "cccd", "cccd VARCHAR(20) NULL")
+        await _ensure_column("lai_xe", "dia_chi", "dia_chi VARCHAR(300) NULL")
+        await _ensure_column("lai_xe", "ngay_sinh", "ngay_sinh DATE NULL")
+        await _ensure_column("lai_xe", "anh_dai_dien", "anh_dai_dien VARCHAR(500) NULL")
+        await _ensure_column("lai_xe", "anh_gplx", "anh_gplx VARCHAR(500) NULL")
+        await _ensure_column("lai_xe", "han_gplx_date", "han_gplx_date DATE NULL")
+        await _ensure_column("lai_xe", "so_gplx", "so_gplx VARCHAR(50) NULL")
+        await _ensure_column("lai_xe", "hop_dong_ngay_ky_date", "hop_dong_ngay_ky_date DATE NULL")
+        await _ensure_column("lai_xe", "ksk_ngay_kham_date", "ksk_ngay_kham_date DATE NULL")
+        await _ensure_column("lai_xe", "tap_huan_ngay_date", "tap_huan_ngay_date DATE NULL")
+        await _ensure_column("import_jobs", "upsert_mode", "upsert_mode VARCHAR(20) DEFAULT 'upsert'")
+        await _ensure_column("import_jobs", "column_mapping", "column_mapping TEXT NULL")
+        await _ensure_column("users", "role", "role VARCHAR(50) DEFAULT 'van_phong'")

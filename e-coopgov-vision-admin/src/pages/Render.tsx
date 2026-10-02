@@ -11,7 +11,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { FileText, Plus, Trash2, Download, Loader2 } from "lucide-react";
+import { FileText, Plus, Trash2, Download, Loader2, CircleHelp } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 import { getTemplates, getTemplate, renderSync, renderAsync } from "@/lib/api";
@@ -79,7 +79,7 @@ const Render = () => {
         a.click();
         a.remove();
         URL.revokeObjectURL(url);
-        toast.success("Render thành công, file đang được tải xuống");
+        toast.success("Tạo hợp đồng thành công, file đang được tải xuống");
       } else {
         const job = await renderAsync(selectedId, data, outputFormat);
         setJobId(job.job_id);
@@ -87,7 +87,7 @@ const Render = () => {
         toast.success(`Job đã tạo: ${job.job_id.split("-")[0]}…`);
       }
     } catch (err: unknown) {
-      toast.error(err instanceof Error ? err.message : "Render thất bại");
+      toast.error(err instanceof Error ? err.message : "Tạo hợp đồng thất bại");
     } finally {
       setRendering(false);
     }
@@ -121,9 +121,9 @@ const Render = () => {
   return (
     <div className="space-y-6 max-w-3xl">
       <div>
-        <h1 className="text-2xl font-display font-bold">Render tài liệu</h1>
+        <h1 className="text-2xl font-display font-bold">Tạo hợp đồng</h1>
         <p className="text-muted-foreground text-sm mt-1">
-          Điền dữ liệu và sinh tài liệu từ template
+          Chọn mẫu hợp đồng, điền thông tin và xuất file
         </p>
       </div>
 
@@ -205,14 +205,20 @@ const Render = () => {
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   {template.metadata.fields.map((f) => (
                     <div key={f.key}>
-                      <Label className="text-xs">
-                        {f.label ?? f.key}
-                        <code className="text-primary ml-1.5 font-mono text-[11px]">
+                      <Label className="text-xs flex items-center gap-1.5">
+                        <span>{f.label ?? f.key}</span>
+                        {f.description && (
+                          <span title={f.description} className="cursor-help inline-flex">
+                            <CircleHelp className="w-3.5 h-3.5 text-muted-foreground" />
+                          </span>
+                        )}
+                        <code className="text-primary ml-1 font-mono text-[11px]">
                           {`{{ ${f.key} }}`}
                         </code>
                       </Label>
                       <Input
-                        placeholder={f.label ?? f.key}
+                        placeholder={f.description ? `${f.label ?? f.key} (${f.description})` : (f.label ?? f.key)}
+                        title={f.description ?? undefined}
                         className="mt-1"
                         value={fieldValues[f.key] ?? ""}
                         onChange={(e) =>
@@ -254,6 +260,7 @@ const Render = () => {
                         <Input
                           key={col}
                           placeholder={tbl.column_labels[col] ?? col}
+                          title={tbl.column_hints?.[col] ?? tbl.column_labels[col] ?? col}
                           value={row[col] ?? ""}
                           onChange={(e) => setCell(tbl.key, ri, col, e.target.value)}
                           className="flex-1 min-w-0"
@@ -309,12 +316,12 @@ const Render = () => {
             >
               {rendering ? (
                 <>
-                  <Loader2 className="w-4 h-4 mr-2 animate-spin" /> Đang render…
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" /> Đang tạo hợp đồng…
                 </>
               ) : (
                 <>
                   <Download className="w-4 h-4 mr-2" />
-                  {renderMode === "sync" ? "Render & Tải ngay" : "Tạo job Async"}
+                  {renderMode === "sync" ? "Tạo hợp đồng & Tải ngay" : "Tạo job Async"}
                 </>
               )}
             </Button>

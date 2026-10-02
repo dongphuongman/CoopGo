@@ -7,6 +7,7 @@ Production considerations:
 - Semaphore để limit concurrent conversions
 """
 import asyncio
+import shutil
 import subprocess
 import uuid
 from pathlib import Path
@@ -15,6 +16,11 @@ from app.core.config import get_settings
 from app.core.logging import logger
 
 settings = get_settings()
+
+if not shutil.which(settings.LIBREOFFICE_BIN):
+    logger.warning("libreoffice_missing",
+                   hint="Cài LibreOffice để render PDF (apt install libreoffice). "
+                        "Render DOCX vẫn hoạt động bình thường.")
 
 # Semaphore giới hạn số conversion đồng thời (LibreOffice nặng memory)
 _semaphore = asyncio.Semaphore(settings.MAX_CONCURRENT_RENDERS)
@@ -63,6 +69,11 @@ def _convert_sync(docx_path: Path, output_dir: Path) -> Path:
     unique_profile = settings.TEMP_DIR / f"lo_profile_{uuid.uuid4().hex}"
     unique_profile.mkdir(parents=True, exist_ok=True)
 
+    if not shutil.which(settings.LIBREOFFICE_BIN):
+        raise RuntimeError(
+            "LibreOffice chưa được cài trên server nên không xuất được PDF. "
+            "Hãy chọn output DOCX hoặc báo admin cài LibreOffice.")
+
     try:
         result = subprocess.run(
             [
@@ -90,5 +101,4 @@ def _convert_sync(docx_path: Path, output_dir: Path) -> Path:
 
     finally:
         # Cleanup profile temp
-        import shutil
         shutil.rmtree(unique_profile, ignore_errors=True)
