@@ -5,7 +5,7 @@ Hệ thống điều hành hợp tác xã vận tải: quản lý **phương ti�
 phù hiệu / bảo hiểm / GPLX, và **quản lý xã viên – vốn góp – doanh thu**.
 
 - Backend: **FastAPI** (`app/`) — MySQL + SQLAlchemy async, JWT auth + phân quyền role
-- Frontend: **React + Vite + shadcn-ui** (`e-coopgov-vision-admin/`) — port 3000
+- Frontend: **React + Vite + shadcn-ui** (`web/`) — port 3000
 
 ---
 
@@ -91,7 +91,7 @@ python3.11 -m venv .venv && ./.venv/bin/pip install -r requirements.txt
 ```
 
 ```bash
-cd e-coopgov-vision-admin && npm install && npm run dev
+cd web && npm install && npm run dev
 # Mở http://localhost:3000 — proxy /api trỏ qua VITE_API_TARGET (mặc định API production)
 ```
 
@@ -200,7 +200,7 @@ app/
 ├── core/              # config, database, logging, scheduler, template_parser
 └── utils/             # date_parse, uploads
 
-e-coopgov-vision-admin/src/
+web/src/
 ├── lib/api/           # client theo domain: auth, templates, fleet,
 │                      # alerts, ops, coop, system (+ api.ts shim)
 ├── lib/permissions.ts # ma trận menu theo role (đồng bộ /roles/matrix)

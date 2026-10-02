@@ -57,10 +57,10 @@ services:
       start_period: 15s
 
   frontend:
-    build: ./e-coopgov-vision-admin
+    build: ./web
     restart: unless-stopped
     volumes:
-      - ./e-coopgov-vision-admin:/app
+      - ./web:/app
       - /app/node_modules
     ports:
       - "3000:3000"
