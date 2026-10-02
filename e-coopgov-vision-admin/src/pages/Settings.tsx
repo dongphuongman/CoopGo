@@ -82,11 +82,11 @@ const SettingsPage = () => {
 
   const resetMutation = useMutation({
     mutationFn: (key: string) => updateAppConfig({ [key]: null }),
-    onSuccess: () => {
+    onSuccess: (_data, key) => {
       qc.invalidateQueries({ queryKey: ["app-config"] });
       setDraft((p) => {
         const n = { ...p };
-        delete n[key as string];
+        delete n[key];
         return n;
       });
       toast.success("Đã về mặc định");

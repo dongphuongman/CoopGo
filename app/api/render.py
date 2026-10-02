@@ -19,7 +19,7 @@ from app.core.config import get_settings
 from app.core.database import get_db, Template, RenderJob, RenderStatus
 from app.services.docx_service import render_docx
 from app.services.pdf_service import convert_to_pdf
-from app.models.schema import RenderRequest, RenderJobResponse, RenderJobStatus, RenderJobListItem
+from app.schemas.render import RenderRequest, RenderJobResponse, RenderJobStatus, RenderJobListItem
 
 router = APIRouter(prefix="/render", tags=["Render"])
 settings = get_settings()

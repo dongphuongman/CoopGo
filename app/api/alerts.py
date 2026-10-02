@@ -11,7 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.models.coop_models import ThongBao
+from app.models.system import ThongBao
 from app.services.expiry_service import expiry_report
 from app.services.notify_service import build_notifications, send_notifications
 from app.api.auth import require_roles

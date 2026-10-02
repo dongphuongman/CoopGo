@@ -20,7 +20,7 @@ from app.core.template_parser import parse_template
 from app.services.ai_service import generate_labels_with_ai, rule_based_hints
 from app.api.auth import require_roles
 from app.utils.uploads import save_upload_limited
-from app.models.schema import (
+from app.schemas.template import (
     TemplateCreateResponse, TemplateDetailResponse,
     LabelConfigUpdate, TemplateMeta, FieldMeta, TableMeta
 )

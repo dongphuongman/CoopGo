@@ -7,7 +7,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.models.fleet_models import PhuongTien, LaiXe
-from app.models.coop_models import Tuyen, XaVien, LenhVanChuyen, DoanhThu
+from app.models.ops import Tuyen, LenhVanChuyen
+from app.models.coop import XaVien, DoanhThu
 from app.services.expiry_service import expiry_report
 
 router = APIRouter(prefix="/dashboard", tags=["Dashboard - Chỉ huy"])

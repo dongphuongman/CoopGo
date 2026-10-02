@@ -21,7 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.core.logging import logger
-from app.models.coop_models import ThongBao
+from app.models.system import ThongBao
 from app.services.expiry_service import expiry_report
 
 settings = get_settings()

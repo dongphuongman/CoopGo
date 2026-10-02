@@ -86,7 +86,7 @@ async def get_db():
 async def init_db():
     # Import models để SQLAlchemy biết các bảng cần tạo
     from app.models import fleet_models  # noqa: F401
-    from app.models import coop_models  # noqa: F401 — tuyến/phân công/lệnh/bảo trì/xã viên/audit/verify
+    from app.models import ops, coop, system  # noqa: F401 — đăng ký bảng với metadata
     import functools
     from sqlalchemy.exc import OperationalError
     from sqlalchemy import text

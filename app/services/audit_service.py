@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.coop_models import AuditLog
+from app.models.system import AuditLog
 
 
 async def log_audit(

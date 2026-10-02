@@ -16,12 +16,13 @@ from sqlalchemy import select, func, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.models.coop_models import Tuyen, PhanCong, LenhVanChuyen, BaoTri, HoSoPhapLy
+from app.models.ops import Tuyen, PhanCong, LenhVanChuyen, BaoTri, HoSoPhapLy
 from app.models.fleet_models import PhuongTien, LaiXe
 from app.services.gplx_service import validate_gplx_for_so_cho
 from app.services.qr_verify_service import new_verify_code
 from app.services.audit_service import log_audit
 from app.utils.date_parse import parse_vn_date
+from app.utils import labels as vi
 from app.api.auth import require_roles
 
 router = APIRouter(tags=["Ops - Điều hành vận tải"])
@@ -190,7 +191,8 @@ async def end_phan_cong(pc_id: str, db: AsyncSession = Depends(get_db)):
         raise HTTPException(404, "Phân công không tồn tại")
     pc.trang_thai = "ket_thuc"
     pc.den_ngay = date.today()
-    await log_audit(db, action="update", entity="phan_cong", entity_id=pc_id, detail="ket_thuc")
+    await log_audit(db, action="update", entity="phan_cong", entity_id=pc_id,
+                    detail=vi.label(vi.TRANG_THAI, "ket_thuc"))
     return {"ok": True}
 
 
@@ -247,7 +249,7 @@ async def create_baotri(payload: BaoTriIn, db: AsyncSession = Depends(get_db)):
     db.add(b)
     await db.flush()
     await log_audit(db, action="create", entity="bao_tri", entity_id=b.id,
-                    detail=f"{pt.bien_so} {payload.loai} {payload.chi_phi}")
+                    detail=f"{pt.bien_so} {vi.label(vi.BAO_TRI_LOAI, payload.loai)} {vi.fmt_money(payload.chi_phi)}")
     return {"id": b.id}
 
 
@@ -291,7 +293,7 @@ async def create_hoso(payload: HoSoIn, db: AsyncSession = Depends(get_db)):
         elif payload.loai == "bao_hieu" or payload.loai == "bao_hiem":
             pt.han_bao_hiem, pt.han_bao_hiem_date = iso, het
     await log_audit(db, action="create", entity="ho_so", entity_id=h.id,
-                    detail=f"{pt.bien_so} {payload.loai}")
+                    detail=f"{pt.bien_so} {vi.label(vi.HOSO_LOAI, payload.loai)}")
     return {"id": h.id}
 
 

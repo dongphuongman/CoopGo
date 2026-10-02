@@ -177,6 +177,39 @@ Storage/  ├── uploads/ (template .docx, file import)
           └── temp/    (file tạm + LibreOffice profiles)
 ```
 
+## 🗂️ Cấu trúc code
+
+```
+app/
+├── main.py            # entrypoint mỏng: app = create_app()
+├── factory.py         # create_app() — CORS, lifespan, đăng ký routers
+├── api/               # 1 file / 1 domain
+│   ├── auth.py        # login/register/me + require_roles
+│   ├── fleet_common.py / fleet_import.py / fleet_vehicles.py / fleet_drivers.py
+│   ├── ops.py         # tuyến, phân công, lệnh, bảo trì, hồ sơ
+│   ├── coop.py        # xã viên, vốn góp, doanh thu
+│   ├── template.py / render.py / bulk.py
+│   ├── verify.py      # public: /verify/{code}, /lenh-qr/{code}
+│   ├── access.py      # audit logs, roles matrix, gán role
+│   ├── alerts.py / dashboard.py / config.py
+├── models/            # SQLAlchemy, 1 file / 1 domain
+│   ├── fleet_models.py / ops.py / coop.py / system.py
+│   └── coop_models.py # shim re-export (tương thích ngược)
+├── schemas/           # Pydantic: template.py / render.py (+ models/schema.py shim)
+├── services/          # nghiệp vụ: expiry, notify, settings, import...
+├── core/              # config, database, logging, scheduler, template_parser
+└── utils/             # date_parse, uploads
+
+e-coopgov-vision-admin/src/
+├── lib/api/           # client theo domain: auth, templates, fleet,
+│                      # alerts, ops, coop, system (+ api.ts shim)
+├── lib/permissions.ts # ma trận menu theo role (đồng bộ /roles/matrix)
+├── lib/labels.ts      # từ điển nhãn TV cho mã trạng thái
+└── pages/             # 1 trang / 1 menu
+
+tests/test_smoke.py    # pytest: routes, auth, nhãn TV, luật GPLX
+```
+
 ## ⚙️ Biến môi trường (`.env`)
 
 | Key | Mặc định | Sửa trên UI được? |

@@ -10,7 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
-from app.models.coop_models import AppSetting
+from app.models.system import AppSetting
 
 _env = get_settings()
 

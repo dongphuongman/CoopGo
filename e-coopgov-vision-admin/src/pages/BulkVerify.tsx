@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { getTemplates, bulkRenderFleet, verifyDoc, getAuditLogs } from "@/lib/api";
+import { roleLabel } from "@/lib/permissions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
@@ -39,6 +40,12 @@ function entityLabel(e: string | null): string {
   return ENTITY_LABELS[e] ?? e;
 }
 
+function detailLabel(action: string, entity: string | null, detail: string | null): string {
+  if (!detail) return "";
+  if (action === "set_role") return roleLabel(detail);
+  return detail;
+}
+
 export default function BulkVerify() {
   const { data: tpls } = useQuery({ queryKey: ["templates"], queryFn: getTemplates });
   const [tpl, setTpl] = useState(""); const [bss, setBss] = useState("");
@@ -65,7 +72,7 @@ export default function BulkVerify() {
           {v.data && <div className="text-sm rounded bg-green-50 border border-green-200 p-3">✅ Hợp lệ • Template: {v.data.template} • Xe: {v.data.bien_so} • <a className="underline text-primary" href={`/api${v.data.download_url}`}>Tải bản gốc</a></div>}
           {v.isError && <p className="text-xs text-destructive">❌ {(v.error as Error).message} (văn bản giả?)</p>}
           <h2 className="font-semibold pt-2">Nhật ký hệ thống (50 mới nhất)</h2>
-          <div className="divide-y text-xs max-h-64 overflow-auto">{(logs ?? []).map((l) => <div key={l.id} className="py-1.5"><b>{actionLabel(l.action)}</b> {entityLabel(l.entity)} • {l.detail} <span className="text-muted-foreground">— {l.created_at}</span></div>)}</div>
+          <div className="divide-y text-xs max-h-64 overflow-auto">{(logs ?? []).map((l) => <div key={l.id} className="py-1.5"><b>{actionLabel(l.action)}</b> {entityLabel(l.entity)} • {detailLabel(l.action, l.entity, l.detail)} <span className="text-muted-foreground">— {l.created_at}</span></div>)}</div>
         </div>
       </div>
     </div>

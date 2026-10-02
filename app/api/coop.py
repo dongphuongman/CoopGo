@@ -7,7 +7,7 @@ from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.models.coop_models import XaVien, VonGop, DoanhThu
+from app.models.coop import XaVien, VonGop, DoanhThu
 from app.services.audit_service import log_audit
 from app.utils.date_parse import parse_vn_date
 from app.api.auth import require_roles
